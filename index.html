@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Weather Monitor</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Set Inter font family -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+            transition: background-color 0.3s;
+        }
+        /* Custom loading spinner styles */
+        .spinner {
+            border-top-color: #3b82f6;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- Main Container -->
+    <div class="w-full max-w-lg bg-white shadow-xl rounded-2xl p-6 md:p-8 space-y-6">
+        
+        <h1 class="text-3xl font-extrabold text-gray-800 text-center mb-6">
+            Global Weather Monitor
+        </h1>
+
+        <!-- Search and Controls -->
+        <div class="flex flex-col md:flex-row space-y-3 md:space-y-0 md:space-x-3">
+            <input type="text" id="location-input" placeholder="Enter City Name or Lat, Lon" 
+                   class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150">
+            
+            <button id="search-button" 
+                    class="bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-150 shadow-md">
+                Search
+            </button>
+        </div>
+
+        <div class="flex justify-between items-center mt-3">
+            <!-- Geolocation Button -->
+            <button id="current-location-button" 
+                    class="flex items-center space-x-2 text-sm text-blue-600 hover:text-blue-800 font-medium transition duration-150">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" />
+                </svg>
+                <span>Current Location</span>
+            </button>
+
+            <!-- Unit Toggle -->
+            <div class="flex items-center text-gray-600 text-sm font-semibold">
+                <span id="unit-celsius" class="cursor-pointer text-blue-600">°C</span>
+                <span class="mx-2 text-gray-400">|</span>
+                <span id="unit-fahrenheit" class="cursor-pointer">°F</span>
+            </div>
+        </div>
+
+        <!-- Weather Display Card (Initial State) -->
+        <div id="weather-display" class="relative min-h-[250px] flex items-center justify-center bg-gray-50 rounded-xl shadow-inner border border-gray-200 p-6 transition-all duration-300">
+            <p id="initial-message" class="text-gray-500 text-center">
+                Use the search box or click "Current Location" to get started!
+            </p>
+            
+            <!-- Loading Spinner (Hidden by default) -->
+            <div id="loading-spinner" class="hidden absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                <div class="spinner border-4 border-gray-200 rounded-full h-10 w-10"></div>
+            </div>
+
+            <!-- Content Container (Hidden by default) -->
+            <div id="weather-content" class="hidden w-full space-y-4">
+                <p id="location-name" class="text-xl font-bold text-gray-700 text-center"></p>
+                
+                <div class="flex items-center justify-center space-x-6">
+                    <!-- Main Temperature -->
+                    <div class="text-center">
+                        <p id="weather-icon" class="text-7xl mb-1">☀️</p>
+                        <p id="weather-description" class="text-lg text-gray-500 font-medium capitalize"></p>
+                    </div>
+                    <div class="flex flex-col items-start">
+                        <p class="text-6xl font-extrabold text-gray-900" id="current-temp"></p>
+                    </div>
+                </div>
+
+                <!-- Details Grid -->
+                <div class="grid grid-cols-2 gap-4 border-t border-gray-200 pt-4">
+                    <div class="flex flex-col items-center">
+                        <p class="text-2xl font-bold text-blue-600" id="wind-speed"></p>
+                        <p class="text-sm text-gray-500">Wind Speed</p>
+                    </div>
+                    <div class="flex flex-col items-center">
+                        <p class="text-2xl font-bold text-blue-600" id="wind-direction"></p>
+                        <p class="text-sm text-gray-500">Wind Direction</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Error Message -->
+        <div id="error-message" class="hidden p-3 bg-red-100 text-red-700 rounded-lg border border-red-300 font-medium">
+            An error occurred. Please try again.
+        </div>
+
+    </div>
+
+    <script>
+        // --- Configuration & State ---
+        const API_URL = 'https://api.openweathermap.org/data/2.5/weather';
+        
+    // ************************************************
+    // * USER ACTION REQUIRED: SET YOUR OWM API KEY    *
+    // *               (DO NOT COMMIT SECRETS)       *
+    // ************************************************
+    // Leave empty here and replace with your API key locally:
+    let OWM_API_KEY = "9a48b5405bd757a68d84f3fe0fbff70d"; // <- set your API key here
+        
+        let currentUnit = 'celsius'; // Default to Celsius
+        let lastWeatherData = null;
+
+        // Utility to convert OWM main weather ID to a simple emoji/description
+        function getWeatherDescription(code) {
+            // OWM codes are grouped by hundreds (2xx=Thunderstorm, 8xx=Clouds/Clear)
+            const mainCode = Math.floor(code / 100);
+            
+            const descriptions = {
+                2: { icon: '🌩️', desc: 'Thunderstorm' }, // 2xx
+                3: { icon: '🌧️', desc: 'Drizzle' }, // 3xx
+                5: { icon: '☔', desc: 'Rain' }, // 5xx
+                6: { icon: '❄️', desc: 'Snow' }, // 6xx
+                7: { icon: '🌫️', desc: 'Mist/Fog/Haze' }, // 7xx
+                8: { 
+                    icon: code === 800 ? '☀️' : '☁️', 
+                    desc: code === 800 ? 'Clear Sky' : 'Clouds' 
+                } // 8xx
+            };
+            return descriptions[mainCode] || { icon: '❓', desc: 'Unknown' };
+        }
+
+        // Utility to convert meters/second to miles/hour
+        function msToMph(ms) {
+            return (ms * 2.237).toFixed(1);
+        }
+
+        // Utility to convert Celsius to Fahrenheit
+        function celsiusToFahrenheit(c) {
+            return (c * 9 / 5 + 32).toFixed(1);
+        }
+
+        // Utility to convert degrees to direction (e.g., 0 -> N, 90 -> E)
+        function degToDirection(deg) {
+            const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+            const index = Math.round(deg / 45) % 8;
+            return directions[index];
+        }
+
+        // --- UI Update Functions ---
+        function showLoading(state) {
+            const spinner = document.getElementById('loading-spinner');
+            spinner.classList.toggle('hidden', !state);
+
+            // Only hide other content when starting loading; when stopping, keep current view as-is
+            if (state) {
+                document.getElementById('initial-message').classList.add('hidden');
+                document.getElementById('weather-content').classList.add('hidden');
+                document.getElementById('error-message').classList.add('hidden');
+            }
+        }
+
+        function showError(message = "Could not fetch weather data. Check input or API Key.") {
+            document.getElementById('weather-content').classList.add('hidden');
+            document.getElementById('initial-message').classList.add('hidden');
+            document.getElementById('error-message').classList.remove('hidden');
+            document.getElementById('error-message').textContent = message;
+        }
+
+        function updateWeatherContent(data) {
+            lastWeatherData = data;
+            
+            // OWM data uses 'metric' units (Celsius) in the API call
+            const tempC = data.main.temp;
+            const tempDisplay = currentUnit === 'celsius' ? tempC.toFixed(1) : celsiusToFahrenheit(tempC);
+            const unitSymbol = currentUnit === 'celsius' ? '°C' : '°F';
+            
+            const windSpeedMs = data.wind.speed; // m/s
+            const windSpeedDisplay = currentUnit === 'celsius' ? windSpeedMs.toFixed(1) + ' m/s' : msToMph(windSpeedMs) + ' mph';
+            
+            const weatherCode = data.weather[0].id;
+            const weatherInfo = getWeatherDescription(weatherCode);
+            
+            // Update DOM
+            document.getElementById('location-name').textContent = `${data.name}, ${data.sys.country}`;
+            document.getElementById('current-temp').textContent = `${tempDisplay}${unitSymbol}`;
+            document.getElementById('weather-icon').textContent = weatherInfo.icon;
+            document.getElementById('weather-description').textContent = data.weather[0].description;
+            document.getElementById('wind-speed').textContent = windSpeedDisplay;
+            // wind.deg can be 0 which is falsy; check for number explicitly
+            document.getElementById('wind-direction').textContent = (typeof data.wind.deg === 'number') ? degToDirection(data.wind.deg) : 'N/A';
+            
+            // Show content and hide others
+            document.getElementById('weather-content').classList.remove('hidden');
+            document.getElementById('initial-message').classList.add('hidden');
+            document.getElementById('error-message').classList.add('hidden');
+        }
+
+        // --- Core Logic: API Fetching ---
+
+        async function fetchWeather(query, isCoords = false) {
+            if (!OWM_API_KEY || OWM_API_KEY.trim() === "") {
+                showError("API Key is missing. Please set your OpenWeatherMap API key in the script (OWM_API_KEY).");
+                return;
+            }
+
+            showLoading(true);
+
+            let url = API_URL;
+            if (isCoords) {
+                // Query is Lat, Lon
+                const [lat, lon] = query.split(',').map(s => s.trim());
+                url += `?lat=${lat}&lon=${lon}&units=metric&appid=${OWM_API_KEY}`;
+            } else {
+                // Query is City Name
+                url += `?q=${encodeURIComponent(query)}&units=metric&appid=${OWM_API_KEY}`;
+            }
+
+            try {
+                // Exponential Backoff implementation (network errors will retry)
+                let response = null;
+                let delay = 1000;
+                for (let i = 0; i < 3; i++) {
+                    try {
+                        response = await fetch(url);
+                    } catch (fetchErr) {
+                        // network error; will retry
+                        response = null;
+                    }
+                    if (response && response.ok) break;
+                    if (i < 2) {
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        delay *= 2;
+                    }
+                }
+
+                if (!response) throw new Error('Network error while fetching API.');
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    updateWeatherContent(data);
+                } else if (data && data.message) {
+                    showError(`API Error: ${data.message}`);
+                } else {
+                    showError('Location not found or invalid API response.');
+                }
+            } catch (e) {
+                console.error('Error fetching weather:', e);
+                showError('Network or API error. See console for details.');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function handleSearch() {
+            const input = document.getElementById('location-input').value.trim();
+            if (!input) return;
+
+            // Simple check for Lat/Lon pattern (e.g., "40.71, -74.00")
+            const parts = input.split(',').map(s => s.trim());
+            
+            if (parts.length >= 2 && !isNaN(parseFloat(parts[0])) && !isNaN(parseFloat(parts[1]))) {
+                // It's a Lat/Lon input
+                fetchWeather(input, true);
+            } else {
+                // It's a City Name input
+                fetchWeather(input, false);
+            }
+        }
+
+        function getCurrentLocation() {
+            if (!OWM_API_KEY || OWM_API_KEY === "YOUR_OWM_API_KEY_HERE") {
+                showError("API Key is missing or set to the placeholder. Please replace 'YOUR_OWM_API_KEY_HERE' in the script with your actual key.");
+                return;
+            }
+            
+            showLoading(true);
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const { latitude, longitude } = position.coords;
+                        const coords = `${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+                        fetchWeather(coords, true);
+                    },
+                    (error) => {
+                        console.error("Geolocation Error:", error);
+                        showError("Geolocation denied or unavailable. Please use the search box.");
+                        showLoading(false);
+                    },
+                    { enableHighAccuracy: false, timeout: 5000, maximumAge: 0 }
+                );
+            } else {
+                showError("Geolocation is not supported by this browser.");
+                showLoading(false);
+            }
+        }
+
+        function toggleUnits() {
+            if (!lastWeatherData) return;
+            
+            // Toggle state
+            currentUnit = currentUnit === 'celsius' ? 'fahrenheit' : 'celsius';
+            
+            // Update UI for unit indicators
+            document.getElementById('unit-celsius').classList.toggle('text-blue-600', currentUnit === 'celsius');
+            document.getElementById('unit-fahrenheit').classList.toggle('text-blue-600', currentUnit === 'fahrenheit');
+            
+            document.getElementById('unit-celsius').classList.toggle('text-gray-600', currentUnit === 'fahrenheit');
+            document.getElementById('unit-fahrenheit').classList.toggle('text-gray-600', currentUnit === 'celsius');
+
+            // Re-render weather content with new unit
+            updateWeatherContent(lastWeatherData);
+        }
+
+        // --- Event Listeners and Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Remove the API key status message, as there is no input field now
+            const keyStatusElement = document.getElementById('api-key-status');
+            if (keyStatusElement) keyStatusElement.remove();
+            
+            document.getElementById('search-button').addEventListener('click', handleSearch);
+            document.getElementById('location-input').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') handleSearch();
+            });
+            document.getElementById('current-location-button').addEventListener('click', getCurrentLocation);
+            document.getElementById('unit-celsius').addEventListener('click', () => { if (currentUnit !== 'celsius') toggleUnits(); });
+            document.getElementById('unit-fahrenheit').addEventListener('click', () => { if (currentUnit !== 'fahrenheit') toggleUnits(); });
+            
+            // Do not auto-invoke geolocation on load to avoid unexpected prompts.
+            // Show helpful initial message
+            document.getElementById('initial-message').textContent = "Enter a city or coordinates and set your OpenWeatherMap API key in the script (OWM_API_KEY) to fetch data.";
+        });
+    </script>
+</body>
+</html>
